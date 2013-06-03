@@ -4,9 +4,23 @@ FILE="out.avi"
 SIZE="800x600"
 FPSO="24"
 FPS="4"
-OPTIONS="-mf fps=$FPSO -ovc lavc -lavcopts vcodec=mpeg4:mbd=2:trell -oac copy"
+PREVIEW=0
+CACHE=0
 
-while getopts "o:s:f:r" optname
+function help()
+{
+  printf "Help:"
+  echo
+  printf "\t-o <file>: \t\tsave to <file>.avi, default is out.avi\n"
+  printf "\t-s <width>x<height>: \tresize to <width>x<height>, default is 800x600\n"
+  printf "\t-f <fps>: \t\tphotos in second, default 4\n"
+  printf "\t-p: \t\t\tpreview (faster converting, low quality)\n"
+  printf "\t-c: \t\t\tcache (don't delete) converted images\n\t\t\t\tif cache directory exist, don't convert images, use cached\n\n"
+  printf "\t-h: \t\t\tthis help\n"
+  echo
+}
+
+while getopts "o:s:f:phc" optname
 do
   case "$optname" in
     "o")
@@ -18,47 +32,67 @@ do
     "f")
       FPS="$OPTARG"
       ;;
-    "r")
-      OPTIONS="-ovc x264 -x264encopts preset=veryslow:tune=film:crf=15:frameref=15:fast_pskip=0:threads=auto"
+    "p")
+      PREVIEW=1
+      ;;
+    "c")
+      CACHE=1
+      ;;
+    "h")
+      help
+      exit 0
       ;;
   esac
 done
 
-D=$(($FPSO/$FPS))
+if [ $PREVIEW -eq 1 ]; then
+  OPTIONS="-mf fps=$FPS -ovc lavc -lavcopts vcodec=mpeg4:mbd=2:trell -oac copy"
+  FPSO=$FPS
+  D=1
+else
+  OPTIONS="-ovc x264 -x264encopts preset=veryslow:tune=film:crf=15:frameref=15:fast_pskip=0:threads=auto"
+  D=$(($FPSO/$FPS))
+fi
+
 echo "converting to file $FILE (size=$SIZE, FPS=$FPS, options=$OPTIONS)"
 
-rm -rf t
-mkdir t
-convert -size $SIZE xc:black t/0black.jpeg
-j=1
-t=$((`ls -1 *.{JPG,jpg,jpeg} 2>/dev/null | wc -l`))
-for i in `ls -1 *.{JPG,jpg,jpeg} 2>/dev/null`; do
-    printf "%0${#t}d:%d converting $i\n" $(($j/$D + 1)) $t
-    convert $OPTIONS $i -resize "$SIZE>" t/$i.jpeg
+if [ $CACHE -eq 0 -a ! -d t ]; then
+  rm -rf t
+  mkdir t
+
+  convert -size $SIZE xc:black t/0black.jpeg
+
+  j=0
+  phc=$((`ls -1 *.{JPG,jpg,jpeg} 2>/dev/null | wc -l`))
+  for i in `ls -1 *.{JPG,jpg,jpeg} 2>/dev/null`; do
+    printf "%0${#t}d:%d converting $i\n" $(($j/$D + 1)) $phc
+    convert $i -resize "$SIZE>" t/$i.jpeg
     ORFILE=t/`printf "a%07d" $j`.JPG;
     composite -gravity center t/$i.jpeg t/0black.jpeg $ORFILE
     rm t/$i.jpeg
 
     j=$(($j+1))
-    for k in `seq 1 $D`; do
+    for k in `seq 2 $D`; do
       (cd t && ln -s "../$ORFILE" `printf "a%07d" $j`.JPG)
       j=$(($j+1))
     done
-done
-FIRST_IMG=`ls -1 t/*.JPG | head -n1`;
-LAST_IMG=`ls -1 t/*.JPG | tail -n1`;
-for i in `seq 0 $(($FPSO))`; do
-  n=`printf "%08d" $i`
-  echo "generation preview/postview $n"
-  d=$(($i * 100/$FPSO))
-  echo "delta is $d"
-  convert $FIRST_IMG -brightness-contrast -$((100-$d)) t/$n.JPG
-  convert $LAST_IMG -brightness-contrast -$d t/z$n.JPG
-done;
+  done
+  FIRST_IMG=`ls -1 t/*.JPG | head -n1`;
+  LAST_IMG=`ls -1 t/*.JPG | tail -n1`;
+  for i in `seq 0 $(($FPSO))`; do
+    n=`printf "%08d" $i`
+    echo "generation preview/postview $n"
+    d=$(($i * 100/$FPSO))
+    echo "delta is $d"
+    convert $FIRST_IMG -brightness-contrast -$((100-$d)) t/$n.JPG
+    convert $LAST_IMG -brightness-contrast -$d t/z$n.JPG
+  done;
+fi
 
-#mencoder mf://t/*.JPG  -o $FILE
 mencoder mf://t/*.JPG \
-  -ovc x264 \
-  -x264encopts preset=veryslow:tune=film:crf=15:frameref=15:fast_pskip=0:threads=auto \
+  $OPTIONS \
   -o $FILE
-rm -rf t
+
+if [ $CACHE -eq 0 ]; then
+  rm -rf t
+fi
