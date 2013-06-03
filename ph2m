@@ -2,10 +2,11 @@
 
 FILE="out.avi"
 SIZE="800x600"
+FPSO="24"
 FPS="4"
-OPTIONS=""
+OPTIONS="-mf fps=$FPSO -ovc lavc -lavcopts vcodec=mpeg4:mbd=2:trell -oac copy"
 
-while getopts "o:s:f:" optname
+while getopts "o:s:f:r" optname
 do
   case "$optname" in
     "o")
@@ -17,33 +18,47 @@ do
     "f")
       FPS="$OPTARG"
       ;;
+    "r")
+      OPTIONS="-ovc x264 -x264encopts preset=veryslow:tune=film:crf=15:frameref=15:fast_pskip=0:threads=auto"
+      ;;
   esac
 done
 
-
+D=$(($FPSO/$FPS))
 echo "converting to file $FILE (size=$SIZE, FPS=$FPS, options=$OPTIONS)"
 
 rm -rf t
 mkdir t
 convert -size $SIZE xc:black t/0black.jpeg
-
-for i in `ls -1 *.{JPG,jpg,jpeg}`; do
-    echo "converting $i"
+j=1
+t=$((`ls -1 *.{JPG,jpg,jpeg} 2>/dev/null | wc -l`))
+for i in `ls -1 *.{JPG,jpg,jpeg} 2>/dev/null`; do
+    printf "%0${#t}d:%d converting $i\n" $(($j/$D + 1)) $t
     convert $OPTIONS $i -resize "$SIZE>" t/$i.jpeg
-    composite -gravity center t/$i.jpeg t/0black.jpeg t/$i.JPG
+    ORFILE=t/`printf "a%07d" $j`.JPG;
+    composite -gravity center t/$i.jpeg t/0black.jpeg $ORFILE
     rm t/$i.jpeg
+
+    j=$(($j+1))
+    for k in `seq 1 $D`; do
+      (cd t && ln -s "../$ORFILE" `printf "a%07d" $j`.JPG)
+      j=$(($j+1))
+    done
 done
 FIRST_IMG=`ls -1 t/*.JPG | head -n1`;
 LAST_IMG=`ls -1 t/*.JPG | tail -n1`;
-for i in `seq 0 $(($FPS))`; do
+for i in `seq 0 $(($FPSO))`; do
   n=`printf "%08d" $i`
   echo "generation preview/postview $n"
-  d=$(($i * 100/$FPS))
+  d=$(($i * 100/$FPSO))
   echo "delta is $d"
   convert $FIRST_IMG -brightness-contrast -$((100-$d)) t/$n.JPG
   convert $LAST_IMG -brightness-contrast -$d t/z$n.JPG
 done;
 
-mencoder mf://t/*.JPG -mf fps=$FPS -ovc lavc -lavcopts vcodec=mpeg4:mbd=2:trell -oac copy -o $FILE
-
+#mencoder mf://t/*.JPG  -o $FILE
+mencoder mf://t/*.JPG \
+  -ovc x264 \
+  -x264encopts preset=veryslow:tune=film:crf=15:frameref=15:fast_pskip=0:threads=auto \
+  -o $FILE
 rm -rf t
