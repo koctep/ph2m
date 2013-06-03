@@ -1,0 +1,49 @@
+#!/bin/bash
+
+FILE="out.avi"
+SIZE="800x600"
+FPS="4"
+OPTIONS=""
+
+while getopts "o:s:f:" optname
+do
+  case "$optname" in
+    "o")
+      FILE="$OPTARG.avi"
+      ;;
+    "s")
+      SIZE="$OPTARG"
+      ;;
+    "f")
+      FPS="$OPTARG"
+      ;;
+  esac
+done
+
+
+echo "converting to file $FILE (size=$SIZE, FPS=$FPS, options=$OPTIONS)"
+
+rm -rf t
+mkdir t
+convert -size $SIZE xc:black t/0black.jpeg
+
+for i in `ls -1 *.{JPG,jpg,jpeg}`; do
+    echo "converting $i"
+    convert $OPTIONS $i -resize "$SIZE>" t/$i.jpeg
+    composite -gravity center t/$i.jpeg t/0black.jpeg t/$i.JPG
+    rm t/$i.jpeg
+done
+FIRST_IMG=`ls -1 t/*.JPG | head -n1`;
+LAST_IMG=`ls -1 t/*.JPG | tail -n1`;
+for i in `seq 0 $(($FPS))`; do
+  n=`printf "%08d" $i`
+  echo "generation preview/postview $n"
+  d=$(($i * 100/$FPS))
+  echo "delta is $d"
+  convert $FIRST_IMG -brightness-contrast -$((100-$d)) t/$n.JPG
+  convert $LAST_IMG -brightness-contrast -$d t/z$n.JPG
+done;
+
+mencoder mf://t/*.JPG -mf fps=$FPS -ovc lavc -lavcopts vcodec=mpeg4:mbd=2:trell -oac copy -o $FILE
+
+rm -rf t
